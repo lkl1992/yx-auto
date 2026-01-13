@@ -1,0 +1,74 @@
+name: 代码混淆
+
+on:
+  push:
+    paths:
+      - 'worker-source.js'
+  workflow_dispatch:
+
+jobs:
+  obfuscate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: 设置Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+      
+      - name: Base64编码和字符切割混淆
+        run: |
+          node << 'EOF'
+          const fs = require('fs');
+          
+          if (!fs.existsSync('worker-source.js')) {
+            console.error('未找到worker-source.js文件');
+            process.exit(1);
+          }
+          
+          // 读取源码
+          const sourceCode = fs.readFileSync('worker-source.js', 'utf8');
+          
+          // Base64编码
+          const base64Str = Buffer.from(sourceCode).toString('base64');
+          
+          // 字符切割（每个字符分开，转义特殊字符）
+          const chars = base64Str.split('').map(c => {
+            if (c === "'") return "'\\''";
+            if (c === '\\') return "'\\\\'";
+            return `'${c}'`;
+          });
+          
+          // 生成混淆后的代码
+          const obfuscatedCode = `// 自动生成的混淆代码 - 请勿手动编辑
+export default {
+    async fetch(request, env, ctx) {
+        const c=[${chars.join(',')}];
+        const s=c.join('');
+        const d=atob(s);
+        const m=new Function('return '+d)();
+        return m.default.fetch(request,env,ctx);
+    }
+};`;
+          
+          fs.writeFileSync('_worker.js', obfuscatedCode);
+          console.log('混淆完成');
+          console.log('原始大小:', sourceCode.length, '字符');
+          console.log('Base64大小:', base64Str.length, '字符');
+          console.log('字符数组长度:', chars.length);
+          EOF
+      
+      - name: 提交混淆后的代码
+        run: |
+          git config --local user.email "byJoey@users.noreply.github.com"
+          git config --local user.name "byJoey"
+          git add _worker.js
+          if ! git diff --staged --quiet; then
+            git commit -m "自动混淆代码 [skip ci]"
+            git push
+          else
+            echo "没有变化，跳过提交"
+          fi
